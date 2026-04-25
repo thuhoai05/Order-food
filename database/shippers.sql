@@ -1,0 +1,10 @@
+CREATE TABLE shippers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL UNIQUE,
+    phone VARCHAR(50),
+	vehicle VARCHAR(100),
+    status ENUM('idle','delivering','offline') DEFAULT 'idle',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+	updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
