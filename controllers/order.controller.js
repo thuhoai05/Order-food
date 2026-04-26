@@ -175,3 +175,138 @@ exports.getTracking = (req, res) => {
     res.json(result);
   });
 };
+
+// 6. Hủy đơn hàng (chỉ pending mới hủy được)
+exports.cancelOrder = (req, res) => {
+  const user_id = req.user.id;
+  const { order_id } = req.params;
+
+  // Kiểm tra đơn hàng tồn tại và thuộc về user
+  db.query(
+    "SELECT * FROM orders WHERE id = ? AND user_id = ?",
+    [order_id, user_id],
+    (err, orders) => {
+      if (err) return res.status(500).json(err);
+      if (orders.length === 0) {
+        return res.status(404).json({ message: "Không tìm thấy đơn hàng" });
+      }
+
+      const order = orders[0];
+
+      // Chỉ cho phép hủy đơn hàng đang ở trạng thái pending
+      if (order.status !== "pending") {
+        return res.status(400).json({ 
+          message: "Không thể hủy đơn hàng đã được xác nhận hoặc đang giao" 
+        });
+      }
+
+      // Cập nhật trạng thái thành cancelled
+      db.query(
+        "UPDATE orders SET status = 'cancelled' WHERE id = ?",
+        [order_id],
+        (err, result) => {
+          if (err) return res.status(500).json(err);
+
+          // Thêm tracking
+          db.query(
+            "INSERT INTO order_tracking (order_id, status) VALUES (?, 'cancelled')",
+            [order_id],
+            (err) => {
+              if (err) console.error("Tracking error:", err);
+            }
+          );
+
+          res.json({ message: "Đơn hàng đã được hủy thành công" });
+        }
+      );
+    }
+  );
+};
+
+// 7. Đặt lại đơn hàng (từ đơn đã hủy hoặc đã hoàn thành)
+exports.reorder = (req, res) => {
+  const user_id = req.user.id;
+  const { order_id } = req.params;
+
+  // Lấy thông tin đơn cũ
+  db.query(
+    "SELECT * FROM orders WHERE id = ? AND user_id = ?",
+    [order_id, user_id],
+    (err, orders) => {
+      if (err) return res.status(500).json(err);
+      if (orders.length === 0) {
+        return res.status(404).json({ message: "Không tìm thấy đơn hàng" });
+      }
+
+      const oldOrder = orders[0];
+
+      // Kiểm tra đơn hàng có thể đặt lại không (cancelled hoặc completed)
+      if (!["cancelled", "completed"].includes(oldOrder.status)) {
+        return res.status(400).json({ 
+          message: "Chỉ có thể đặt lại đơn hàng đã hủy hoặc hoàn thành" 
+        });
+      }
+
+      // Lấy các sản phẩm từ đơn cũ
+      db.query(
+        "SELECT product_id, quantity FROM order_items WHERE order_id = ?",
+        [order_id],
+        (err, items) => {
+          if (err) return res.status(500).json(err);
+          if (items.length === 0) {
+            return res.status(400).json({ message: "Đơn hàng không có sản phẩm" });
+          }
+
+          // Lấy cart của user
+          db.query(
+            "SELECT id FROM carts WHERE user_id = ?",
+            [user_id],
+            (err, carts) => {
+              if (err) return res.status(500).json(err);
+
+              let cart_id;
+              if (carts.length === 0) {
+                // Tạo giỏ hàng mới nếu chưa có
+                db.query(
+                  "INSERT INTO carts (user_id) VALUES (?)",
+                  [user_id],
+                  (err, result) => {
+                    if (err) return res.status(500).json(err);
+                    cart_id = result.insertId;
+                    addItemsToCart();
+                  }
+                );
+              } else {
+                cart_id = carts[0].id;
+                addItemsToCart();
+              }
+
+              function addItemsToCart() {
+                // Thêm từng sản phẩm vào giỏ (dùng INSERT IGNORE để tránh trùng)
+                let addedCount = 0;
+                items.forEach((item) => {
+                  db.query(
+                    `INSERT INTO cart_items (cart_id, product_id, quantity) 
+                     VALUES (?, ?, ?) 
+                     ON DUPLICATE KEY UPDATE quantity = quantity + ?`,
+                    [cart_id, item.product_id, item.quantity, item.quantity],
+                    (err) => {
+                      if (err) console.error("Add to cart error:", err);
+                      addedCount++;
+                      if (addedCount === items.length) {
+                        res.json({ 
+                          message: "Đã thêm sản phẩm vào giỏ hàng",
+                          cart_id: cart_id
+                        });
+                      }
+                    }
+                  );
+                });
+              }
+            }
+          );
+        }
+      );
+    }
+  );
+};

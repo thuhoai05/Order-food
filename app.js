@@ -23,6 +23,13 @@ const orderRoutes = require("./routes/order.routes");
 app.use("/orders", orderRoutes);
 const paymentRoutes = require("./routes/payment.routes");
 app.use("/payments", paymentRoutes);
+
+const favoriteRoutes = require("./routes/favorite.routes");
+app.use("/favorites", favoriteRoutes);
+
+const reviewRoutes = require("./routes/review.routes");
+app.use("/reviews", reviewRoutes);
+
 app.get("/", (req, res) => {
   res.send("API is running 🚀");
 });
